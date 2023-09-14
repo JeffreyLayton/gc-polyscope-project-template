@@ -2,8 +2,6 @@
 #include "geometrycentral/surface/meshio.h"
 #include "geometrycentral/surface/vertex_position_geometry.h"
 
-#include "geometrycentral/surface/direction_fields.h"
-
 #include "polyscope/polyscope.h"
 #include "polyscope/surface_mesh.h"
 
@@ -18,88 +16,75 @@ std::unique_ptr<ManifoldSurfaceMesh> mesh;
 std::unique_ptr<VertexPositionGeometry> geometry;
 
 // Polyscope visualization handle, to quickly add data to the surface
-polyscope::SurfaceMesh *psMesh;
+polyscope::SurfaceMesh* psMesh;
+polyscope::SurfaceVertexScalarQuantity* psVertexMinimumPrincipleCurvature;
+polyscope::SurfaceVertexScalarQuantity* psVertexMaximumPrincipleCurvature;
+polyscope::SurfaceVertexScalarQuantity* psVertexMeanCurvature;
+polyscope::SurfaceVertexScalarQuantity* psVertexGaussianCurvature;
+polyscope::SurfaceFaceScalarQuantity* psFaceGaussianCurvature;
 
-// Some algorithm parameters
-float param1 = 42.0;
-
-// Example computation function -- this one computes and registers a scalar
-// quantity
-void doWork() {
-  polyscope::warning("Computing Gaussian curvature.\nalso, parameter value = " +
-                     std::to_string(param1));
-
-  geometry->requireVertexGaussianCurvatures();
-  psMesh->addVertexScalarQuantity("curvature",
-                                  geometry->vertexGaussianCurvatures,
-                                  polyscope::DataType::SYMMETRIC);
-}
-
-// A user-defined callback, for creating control panels (etc)
-// Use ImGUI commands to build whatever you want here, see
-// https://github.com/ocornut/imgui/blob/master/imgui.h
 void myCallback() {
-
-  if (ImGui::Button("do work")) {
-    doWork();
-  }
-
-  ImGui::SliderFloat("param", &param1, 0., 100.);
+	//if (ImGui::Combo("Curvature options", &item_current, items, IM_ARRAYSIZE(items)) {
+	//}
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
+	// Configure the argument parser
+	args::ArgumentParser parser("geometry-central & Polyscope example project");
+	args::Positional<std::string> inputFilename(parser, "mesh", "A mesh file.");
 
-  // Configure the argument parser
-  args::ArgumentParser parser("geometry-central & Polyscope example project");
-  args::Positional<std::string> inputFilename(parser, "mesh", "A mesh file.");
+	// Parse args
+	try {
+		parser.ParseCLI(argc, argv);
+	}
+	catch (args::Help& h) {
+		std::cout << parser;
+		return 0;
+	}
+	catch (args::ParseError& e) {
+		std::cerr << e.what() << std::endl;
+		std::cerr << parser;
+		return 1;
+	}
 
-  // Parse args
-  try {
-    parser.ParseCLI(argc, argv);
-  } catch (args::Help &h) {
-    std::cout << parser;
-    return 0;
-  } catch (args::ParseError &e) {
-    std::cerr << e.what() << std::endl;
-    std::cerr << parser;
-    return 1;
-  }
+	// Make sure a mesh name was given
+	if (!inputFilename) {
+		std::cerr << "Please specify a mesh file as argument" << std::endl;
+		return EXIT_FAILURE;
+	}
 
-  // Make sure a mesh name was given
-  if (!inputFilename) {
-    std::cerr << "Please specify a mesh file as argument" << std::endl;
-    return EXIT_FAILURE;
-  }
+	// Initialize polyscope
+	polyscope::init();
 
-  // Initialize polyscope
-  polyscope::init();
+	// Set the callback function
+	polyscope::state::userCallback = myCallback;
 
-  // Set the callback function
-  polyscope::state::userCallback = myCallback;
+	// Load mesh
+	std::tie(mesh, geometry) = readManifoldSurfaceMesh(args::get(inputFilename));
 
-  // Load mesh
-  std::tie(mesh, geometry) = readManifoldSurfaceMesh(args::get(inputFilename));
+	// Register the mesh with polyscope
+	psMesh = polyscope::registerSurfaceMesh(
+		polyscope::guessNiceNameFromPath(args::get(inputFilename)),
+		geometry->inputVertexPositions, mesh->getFaceVertexList(),
+		polyscopePermutations(*mesh));
 
-  // Register the mesh with polyscope
-  psMesh = polyscope::registerSurfaceMesh(
-      polyscope::guessNiceNameFromPath(args::get(inputFilename)),
-      geometry->inputVertexPositions, mesh->getFaceVertexList(),
-      polyscopePermutations(*mesh));
+	// Set vertex tangent spaces
+	geometry->requireVertexGaussianCurvatures();
+	geometry->requireVertexMeanCurvatures();
+	geometry->requireVertexMinPrincipalCurvatures();
+	geometry->requireVertexMaxPrincipalCurvatures();
+	geometry->requireFaceGaussianCurvatures();
 
-  // Set vertex tangent spaces
-  geometry->requireVertexTangentBasis();
-  VertexData<Vector3> vBasisX(*mesh);
-  for (Vertex v : mesh->vertices()) {
-    vBasisX[v] = geometry->vertexTangentBasis[v][0];
-  }
-  psMesh->setVertexTangentBasisX(vBasisX);
+	psVertexMinimumPrincipleCurvature = psMesh->addVertexScalarQuantity("Minimum Principle Vertex Curvature", geometry->vertexMinPrincipalCurvatures);
+	psVertexMaximumPrincipleCurvature = psMesh->addVertexScalarQuantity("Maximum Principle Vertex Curvature", geometry->vertexMaxPrincipalCurvatures);
+	psVertexMeanCurvature = psMesh->addVertexScalarQuantity("Mean Vertex Curvature", geometry->vertexMeanCurvatures);
+	psVertexGaussianCurvature = psMesh->addVertexScalarQuantity("Gaussian Vertex Curvature", geometry->vertexGaussianCurvatures);
+	psFaceGaussianCurvature = psMesh->addFaceScalarQuantity("Gaussian Face Curvature", geometry->faceGaussianCurvatures);
 
-  auto vField =
-      geometrycentral::surface::computeSmoothestVertexDirectionField(*geometry);
-  psMesh->addVertexIntrinsicVectorQuantity("VF", vField);
+	// Give control to the polyscope gui
+	polyscope::show();
 
-  // Give control to the polyscope gui
-  polyscope::show();
 
-  return EXIT_SUCCESS;
+
+	return EXIT_SUCCESS;
 }
